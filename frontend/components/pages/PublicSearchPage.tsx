@@ -113,7 +113,7 @@ export function PublicSearchPage({ onLoggedIn }: { onLoggedIn: () => void }) {
             </div>
           </div>
 
-          <p className="mt-3 text-xs text-slate-400">Kalau kolom nilai belum muncul, hapus backend/data/public_lookup.xlsx lalu login admin, analisis ulang, dan Generate Excel Final ulang.</p>
+          <p className="mt-3 text-xs text-slate-400">Data pencarian disimpan di Supabase. Kalau data belum muncul, login admin lalu Analisis ulang dan Generate Excel Final ulang.</p>
         </div>
 
         <aside className="rounded-3xl border border-slate-200 bg-white p-7 shadow-soft">
