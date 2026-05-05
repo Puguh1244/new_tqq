@@ -1,0 +1,15 @@
+import { Approval } from "@/types";
+
+export function ValidasiNamaPage({ result, approvals, setApprovals, onApply }: { result: any; approvals: Approval[]; setApprovals: (a: Approval[]) => void; onApply: () => void }) {
+  if (!result) return <Empty text="Jalankan analisis terlebih dahulu." />;
+  if (result.mode === "without_master") return <Empty text="Validasi nama tidak diperlukan karena mode Tanpa Data Master menggunakan KODE KELAS PAI dari rekap." />;
+  const rows = result.recommendations || [];
+  const map = new Map(approvals.map((a) => [a.mapping_id, a]));
+  const toggle = (row: any, approved: boolean) => {
+    const next = approvals.filter((a) => a.mapping_id !== row.mapping_id);
+    next.push({ mapping_id: row.mapping_id, approved, matched_name: row.nama_master, matched_class: row.kode_kelas_pai });
+    setApprovals(next);
+  };
+  return <main className="space-y-5"><header><h2 className="text-3xl font-black text-slate-900">Validasi Nama</h2><p className="mt-1 text-sm text-slate-500">Setujui atau tolak rekomendasi nama sebelum generate Excel final.</p></header><div className="flex gap-3"><button onClick={() => setApprovals(rows.map((r: any) => ({ mapping_id: r.mapping_id, approved: true, matched_name: r.nama_master, matched_class: r.kode_kelas_pai })))} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">Setujui Semua</button><button onClick={() => setApprovals(rows.map((r: any) => ({ mapping_id: r.mapping_id, approved: false })))} className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-bold text-slate-700">Batalkan Semua</button><button onClick={onApply} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white">Terapkan Pilihan</button></div><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><table className="min-w-full text-sm"><thead className="bg-slate-50"><tr>{["Setujui", "Nama di Rekap", "Rekomendasi Nama Master", "Kelas Asli", "Confidence", "Alasan", "Status"].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{h}</th>)}</tr></thead><tbody>{rows.length ? rows.map((r: any) => { const a = map.get(r.mapping_id); return <tr key={r.mapping_id} className="border-t"><td className="px-4 py-3"><input type="checkbox" checked={a?.approved || false} onChange={(e) => toggle(r, e.target.checked)} /></td><td className="px-4 py-3">{r.nama_rekap}</td><td className="px-4 py-3 font-semibold">{r.nama_master}</td><td className="px-4 py-3">{r.kode_kelas_pai}</td><td className="px-4 py-3">{r.confidence}</td><td className="max-w-md px-4 py-3 text-slate-500">{r.catatan}</td><td className="px-4 py-3">{a ? (a.approved ? "APPROVED_BY_USER" : "REJECTED_BY_USER") : r.status_mapping}</td></tr> }) : <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">Tidak ada nama yang perlu dikonfirmasi.</td></tr>}</tbody></table></div></main>;
+}
+function Empty({ text }: { text: string }) { return <main className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">{text}</main>; }

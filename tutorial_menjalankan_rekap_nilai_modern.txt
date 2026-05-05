@@ -1,0 +1,328 @@
+TUTORIAL MENJALANKAN PROJECT REKAP NILAI MODERN
+=================================================
+
+Project ini terdiri dari 2 bagian:
+
+1. BACKEND
+   Lokasi: D:\rekap-nilai-modern\backend
+   Fungsi: memproses Excel, login admin, generate Excel final, dan pencarian NIM publik.
+
+2. FRONTEND
+   Lokasi: D:\rekap-nilai-modern\frontend
+   Fungsi: tampilan web dashboard, halaman login, halaman cari NIM, upload file, validasi, preview, dan download.
+
+-------------------------------------------------
+A. PERSIAPAN AWAL
+-------------------------------------------------
+
+Pastikan sudah install:
+
+1. Python
+   Cek:
+   python --version
+
+2. Node.js dan npm
+   Cek:
+   node -v
+   npm -v
+
+Kalau belum ada Node.js, install dari:
+https://nodejs.org
+
+-------------------------------------------------
+B. SETTING FILE ENV BACKEND
+-------------------------------------------------
+
+Buka folder:
+
+D:\rekap-nilai-modern\backend
+
+Pastikan ada file:
+
+.env
+
+Kalau belum ada, copy dari template:
+
+copy .env.example .env
+
+Isi file backend/.env seperti ini:
+
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+APP_AUTH_TOKEN=
+PUBLIC_LOOKUP_FILE=
+
+GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxx
+GROQ_MODEL=openai/gpt-oss-120b
+
+FRONTEND_ORIGINS=http://localhost:3000
+
+Catatan:
+- Ganti GROQ_API_KEY dengan API key Groq asli.
+- Kalau belum pakai Groq, boleh dikosongkan:
+  GROQ_API_KEY=
+- PUBLIC_LOOKUP_FILE boleh kosong. Kalau kosong, sistem otomatis memakai:
+  backend/data/public_lookup.xlsx
+
+-------------------------------------------------
+C. SETTING FILE ENV FRONTEND
+-------------------------------------------------
+
+Buka folder:
+
+D:\rekap-nilai-modern\frontend
+
+Pastikan ada file:
+
+.env.local
+
+Kalau belum ada, copy dari template:
+
+copy .env.example .env.local
+
+Isi file frontend/.env.local:
+
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+
+Catatan:
+- Jangan isi API key Groq di frontend.
+- API key Groq hanya boleh ada di backend/.env.
+
+-------------------------------------------------
+D. MENJALANKAN BACKEND
+-------------------------------------------------
+
+Buka terminal PowerShell pertama.
+
+Masuk ke folder backend:
+
+cd D:\rekap-nilai-modern\backend
+
+Kalau belum pernah membuat virtual environment, jalankan:
+
+python -m venv .venv
+
+Aktifkan virtual environment:
+
+.venv\Scripts\activate
+
+Kalau berhasil, di terminal akan muncul tanda:
+
+(.venv)
+
+Install dependency backend:
+
+pip install -r requirements.txt
+
+Jalankan backend:
+
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+Backend berhasil kalau muncul kira-kira:
+
+Uvicorn running on http://0.0.0.0:8000
+
+Cek di browser:
+
+http://localhost:8000/api/health
+
+Kalau muncul JSON status ok, backend sudah hidup.
+
+-------------------------------------------------
+E. MENJALANKAN FRONTEND
+-------------------------------------------------
+
+Buka terminal PowerShell kedua.
+
+Masuk ke folder frontend:
+
+cd D:\rekap-nilai-modern\frontend
+
+Install dependency frontend kalau belum pernah:
+
+npm install
+
+Jalankan frontend mode development:
+
+npm run dev
+
+Frontend berhasil kalau muncul kira-kira:
+
+Local: http://localhost:3000
+
+Buka browser:
+
+http://localhost:3000
+
+-------------------------------------------------
+F. CARA PAKAI APLIKASI
+-------------------------------------------------
+
+1. Saat belum login
+   Tampilan hanya menampilkan halaman:
+
+   Cari nama berdasarkan NIM
+
+   User publik hanya bisa memasukkan NIM untuk melihat data mahasiswa.
+
+2. Login admin
+   Klik tombol login admin.
+   Gunakan akun dari backend/.env:
+
+   Username: admin
+   Password: admin123
+
+3. Setelah login
+   Admin bisa masuk dashboard lengkap:
+   - Dashboard
+   - Analisis
+   - Validasi Nama
+   - Validasi Nilai
+   - Preview Output
+   - Download
+
+4. Analisis data
+   Masuk menu Analisis.
+
+   Mode Pakai Data Master:
+   - Upload Data Master
+   - Upload Rekapitulasi Nilai
+   - Aktifkan Groq kalau perlu
+   - Klik Analisis Data
+
+   Mode Tanpa Data Master:
+   - Upload Rekapitulasi Nilai
+   - Pastikan file rekap punya kolom KODE KELAS PAI
+   - Klik Analisis Data
+
+5. Validasi nama
+   Kalau pakai Data Master dan ada nama typo:
+   - Masuk menu Validasi Nama
+   - Centang rekomendasi yang benar
+   - Klik Terapkan Pilihan
+
+6. Preview output
+   Masuk menu Preview Output.
+   Di sini bisa cek sheet kelas seperti Excel.
+   Klik sheet kelas untuk melihat isi per kelas.
+
+7. Generate Excel final
+   Masuk menu Download.
+   Klik Generate Excel Final.
+   Setelah selesai, klik Download Excel Final.
+
+8. Pencarian NIM publik
+   Setelah admin klik Generate Excel Final, backend otomatis membuat:
+
+   backend/data/public_lookup.xlsx
+
+   File ini dipakai halaman publik untuk cari data berdasarkan NIM.
+
+   Jadi kalau file public_lookup.xlsx belum ada, lakukan:
+   Login admin -> Analisis ulang -> Generate Excel Final ulang.
+
+-------------------------------------------------
+G. KALAU ERROR DI FRONTEND
+-------------------------------------------------
+
+Kalau muncul error merah Next.js di browser saat development,
+itu normal di mode:
+
+npm run dev
+
+Untuk production lokal, jalankan:
+
+npm run build
+npm run start
+
+Kalau error masih muncul setelah patch, hapus cache Next.js:
+
+cd D:\rekap-nilai-modern\frontend
+rmdir /s /q .next
+npm run dev
+
+-------------------------------------------------
+H. KALAU PUBLIC LOOKUP TIDAK MUNCUL NILAI
+-------------------------------------------------
+
+Cek file:
+
+D:\rekap-nilai-modern\backend\data\public_lookup.xlsx
+
+Kalau file itu hanya punya kolom:
+
+NIM
+NAMA
+KODE KELAS PAI
+
+berarti file lookup masih versi lama.
+
+Solusi:
+1. Hapus file lookup lama:
+
+cd D:\rekap-nilai-modern\backend
+del .\data\public_lookup.xlsx
+
+2. Restart backend.
+3. Restart frontend.
+4. Login admin.
+5. Analisis ulang.
+6. Generate Excel Final ulang.
+
+Setelah itu public_lookup.xlsx harus berisi kolom lengkap dari Excel final,
+misalnya:
+NIM, NAMA, KODE KELAS PAI, PRODI, KELAS UMUM, PRESENSI, BACAAN, HAFALAN,
+EVALUASI, TOTAL NILAI, dan kolom lain yang ada di file final.
+
+-------------------------------------------------
+I. PERINTAH PENTING
+-------------------------------------------------
+
+Jalankan backend:
+
+cd D:\rekap-nilai-modern\backend
+.venv\Scripts\activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+Jalankan frontend:
+
+cd D:\rekap-nilai-modern\frontend
+npm run dev
+
+Cek backend:
+
+http://localhost:8000/api/health
+
+Buka web:
+
+http://localhost:3000
+
+-------------------------------------------------
+J. CATATAN DEPLOY
+-------------------------------------------------
+
+Untuk deploy:
+
+Frontend:
+- Deploy folder frontend ke Vercel.
+- Set environment:
+  NEXT_PUBLIC_API_BASE_URL=https://alamat-backend-kamu
+
+Backend:
+- Deploy folder backend ke Render/Railway/VPS.
+- Set environment:
+  ADMIN_USERNAME
+  ADMIN_PASSWORD
+  GROQ_API_KEY
+  GROQ_MODEL
+  FRONTEND_ORIGINS
+  PUBLIC_LOOKUP_FILE
+
+Agar data public_lookup.xlsx tidak hilang saat server restart,
+gunakan persistent disk dan set:
+
+PUBLIC_LOOKUP_FILE=/data/public_lookup.xlsx
+
+-------------------------------------------------
+SELESAI
+-------------------------------------------------
