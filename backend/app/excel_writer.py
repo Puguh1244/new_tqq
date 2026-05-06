@@ -17,6 +17,8 @@ AUDIT_TECH_COLS = {
 }
 
 SOURCE_NUMBER_HEADERS = {"NO", "NOMOR", "NOURUT", "NOMORURUT", "NUMBER", "NUM"}
+FORMULA_PREFIXES = ("=", "+", "-", "@")
+FORMULA_CONTROL_PREFIXES = ("\t", "\r", "\n")
 
 
 def normalize_header(value: Any) -> str:
@@ -35,6 +37,24 @@ def is_source_number_column(column: Any) -> bool:
 def drop_source_number_columns(df: pd.DataFrame) -> pd.DataFrame:
     cols = [c for c in df.columns if is_source_number_column(c)]
     return df.drop(columns=cols, errors="ignore")
+
+
+def escape_formula_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith(FORMULA_CONTROL_PREFIXES) or value.lstrip().startswith(FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def sanitize_df_for_excel(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df.map(escape_formula_value)
+
+
+def write_excel_df(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: str) -> None:
+    sanitize_df_for_excel(df).to_excel(writer, sheet_name=sheet_name, index=False)
 
 
 def sanitize_sheet_name(name: Any) -> str:
@@ -106,13 +126,13 @@ def generate_excel_file(out_path: Path, mode: str, rekap: ExcelData, result: Ana
                 i += 1
             used.add(sheet_name)
             class_df = clean_class_df(pd.DataFrame(rows), klass, rekap.class_col)
-            class_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            write_excel_df(writer, class_df, sheet_name)
 
-        df_from_records(result.mapping, ["mapping_id", "nama_rekap", "nama_master", "kode_kelas_pai", "status_mapping"]).to_excel(writer, sheet_name="LOG_MAPPING", index=False)
-        df_from_records([x for x in result.mapping if x.get("status_mapping") == "NEEDS_CONFIRMATION"], ["mapping_id", "nama_rekap", "nama_master", "kode_kelas_pai", "confidence"]).to_excel(writer, sheet_name="PERLU_KONFIRMASI", index=False)
-        pd.DataFrame(unmapped_rows).to_excel(writer, sheet_name="BELUM_TERPETAKAN", index=False)
-        df_from_records(result.duplicates, ["source", "nama", "nama_normalized", "count"]).to_excel(writer, sheet_name="NAMA_DUPLIKAT", index=False)
-        df_from_records(result.missing_scores, ["row_id", "sheet_asal", "nama", "catatan"]).to_excel(writer, sheet_name="BELUM_ADA_NILAI", index=False)
-        df_from_records(result.validation_scores, ["row_id", "sheet_asal", "nama", "kolom_nilai", "nilai", "jenis_masalah", "catatan"]).to_excel(writer, sheet_name="VALIDASI_NILAI", index=False)
-        df_from_records(result.validation_codes, ["row_id", "sheet_asal", "nama", "kode_kelas_pai", "jenis_masalah", "catatan"]).to_excel(writer, sheet_name="VALIDASI_KODE", index=False)
-        pd.DataFrame([result.summary]).to_excel(writer, sheet_name="RINGKASAN", index=False)
+        write_excel_df(writer, df_from_records(result.mapping, ["mapping_id", "nama_rekap", "nama_master", "kode_kelas_pai", "status_mapping"]), "LOG_MAPPING")
+        write_excel_df(writer, df_from_records([x for x in result.mapping if x.get("status_mapping") == "NEEDS_CONFIRMATION"], ["mapping_id", "nama_rekap", "nama_master", "kode_kelas_pai", "confidence"]), "PERLU_KONFIRMASI")
+        write_excel_df(writer, pd.DataFrame(unmapped_rows), "BELUM_TERPETAKAN")
+        write_excel_df(writer, df_from_records(result.duplicates, ["source", "nama", "nama_normalized", "count"]), "NAMA_DUPLIKAT")
+        write_excel_df(writer, df_from_records(result.missing_scores, ["row_id", "sheet_asal", "nama", "catatan"]), "BELUM_ADA_NILAI")
+        write_excel_df(writer, df_from_records(result.validation_scores, ["row_id", "sheet_asal", "nama", "kolom_nilai", "nilai", "jenis_masalah", "catatan"]), "VALIDASI_NILAI")
+        write_excel_df(writer, df_from_records(result.validation_codes, ["row_id", "sheet_asal", "nama", "kode_kelas_pai", "jenis_masalah", "catatan"]), "VALIDASI_KODE")
+        write_excel_df(writer, pd.DataFrame([result.summary]), "RINGKASAN")

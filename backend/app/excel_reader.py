@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+import re
 from typing import Any
 
 import pandas as pd
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 
 NAME_CANDIDATES = ["NAMA", "NAMA MAHASISWA", "NAMA LENGKAP", "NAME"]
 CLASS_CANDIDATES = ["KODE KELAS PAI", "KELAS PAI", "KODE KELAS", "KELAS"]
+INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
 
 
 @dataclass
@@ -24,6 +26,44 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).replace("\u00a0", " ").strip() for c in df.columns]
     return df
+
+
+def duplicate_key(column: Any) -> str:
+    text = str(column).replace("\u00a0", " ").strip()
+    text = re.sub(r"\.\d+$", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.upper()
+
+
+def validate_unique_columns(df: pd.DataFrame, context: str) -> None:
+    seen: dict[str, str] = {}
+    duplicates: list[str] = []
+    for column in df.columns:
+        key = duplicate_key(column)
+        if not key:
+            continue
+        if key in seen:
+            duplicates.append(f"{seen[key]} / {column}")
+        else:
+            seen[key] = str(column)
+    if duplicates:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": f"Kolom duplikat ditemukan di {context}.", "duplicates": duplicates},
+        )
+
+
+def validate_sheet_names(sheet_names: list[str], context: str) -> None:
+    invalid: list[str] = []
+    for sheet_name in sheet_names:
+        text = str(sheet_name)
+        if not text.strip() or len(text) > 31 or INVALID_SHEET_CHARS.search(text):
+            invalid.append(text)
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": f"Nama sheet tidak valid di file {context}.", "sheets": invalid},
+        )
 
 
 def find_column(columns, candidates: list[str]) -> str | None:
@@ -45,6 +85,8 @@ def read_rekap_excel(contents: bytes) -> ExcelData:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"File rekap tidak bisa dibaca sebagai Excel: {exc}") from exc
 
+    validate_sheet_names(list(map(str, xls.sheet_names)), "rekap")
+
     frames: list[pd.DataFrame] = []
     sheets: list[dict[str, Any]] = []
     row_id = 1
@@ -52,6 +94,7 @@ def read_rekap_excel(contents: bytes) -> ExcelData:
     for sheet_name in xls.sheet_names:
         df = pd.read_excel(xls, sheet_name=sheet_name, dtype=object)
         df = clean_columns(df)
+        validate_unique_columns(df, f"rekap sheet {sheet_name}")
         df = df.dropna(how="all")
         if df.empty:
             continue
@@ -92,7 +135,9 @@ def read_master_excel(contents: bytes) -> ExcelData:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"File master tidak bisa dibaca sebagai Excel: {exc}") from exc
 
-    df = clean_columns(df).dropna(how="all")
+    df = clean_columns(df)
+    validate_unique_columns(df, "master")
+    df = df.dropna(how="all")
     name_col = find_column(df.columns, NAME_CANDIDATES)
     class_col = find_column(df.columns, CLASS_CANDIDATES)
 

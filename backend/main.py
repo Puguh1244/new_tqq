@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 import secrets
 import tempfile
+import time
 import uuid
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
@@ -15,7 +18,7 @@ from pydantic import BaseModel
 
 from app.excel_reader import read_master_excel, read_rekap_excel
 from app.excel_writer import generate_excel_file
-from app.matching import analyze_with_master, analyze_without_master, apply_user_approvals
+from app.matching import analyze_with_master, analyze_without_master, apply_user_approvals, build_preview
 from app.schemas import ApprovalPayload, GenerateExcelPayload
 from app.supabase_lookup import lookup_health, search_lookup_by_nim, update_lookup_from_generated_excel
 
@@ -23,9 +26,12 @@ load_dotenv()
 
 app = FastAPI(title="Rekap Nilai Per Kelas Asli API", version="1.0.0")
 
-origins = [x.strip() for x in os.getenv("FRONTEND_ORIGINS", "http://localhost:3000").split(",") if x.strip()]
-allow_all_origins = "*" in origins
-allowed_origins = ["*"] if allow_all_origins else origins + ["http://127.0.0.1:3000"]
+DEFAULT_FRONTEND_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://new-tqq.vercel.app"
+origins = [x.strip() for x in os.getenv("FRONTEND_ORIGINS", DEFAULT_FRONTEND_ORIGINS).split(",") if x.strip()]
+allow_all_origins = "*" in origins and os.getenv("ALLOW_ALL_ORIGINS", "").lower() == "true"
+allowed_origins = ["*"] if allow_all_origins else sorted({x for x in origins if x != "*"})
+if not allowed_origins:
+    allowed_origins = DEFAULT_FRONTEND_ORIGINS.split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -35,8 +41,18 @@ app.add_middleware(
 )
 
 SESSIONS: dict[str, dict] = {}
-DOWNLOADS: dict[str, str] = {}
+DOWNLOADS: dict[str, dict[str, object]] = {}
 RUNTIME_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN") or secrets.token_urlsafe(32)
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))
+SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", str(60 * 60)))
+DOWNLOAD_TTL_SECONDS = int(os.getenv("DOWNLOAD_TTL_SECONDS", str(60 * 60)))
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+XLSX_CONTENT_TYPES = {
+    "",
+    "application/octet-stream",
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 class LoginRequest(BaseModel):
@@ -53,9 +69,80 @@ def require_admin(authorization: str | None = Header(default=None)) -> bool:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Login admin diperlukan.")
     token = authorization.split(" ", 1)[1].strip()
-    if token != RUNTIME_AUTH_TOKEN:
+    if not secrets.compare_digest(token, RUNTIME_AUTH_TOKEN):
         raise HTTPException(status_code=401, detail="Token admin tidak valid atau sudah kedaluwarsa.")
     return True
+
+
+def is_production_runtime() -> bool:
+    return os.getenv("VERCEL") == "1" or os.getenv("ENVIRONMENT", "").lower() == "production"
+
+
+def validate_uuid(value: str, label: str) -> None:
+    try:
+        uuid.UUID(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=f"{label} tidak ditemukan atau sudah kedaluwarsa.") from exc
+
+
+def prune_expired_state() -> None:
+    now = time.time()
+    for session_id, session in list(SESSIONS.items()):
+        if now - float(session.get("created_at", 0)) > SESSION_TTL_SECONDS:
+            SESSIONS.pop(session_id, None)
+    for file_id, download in list(DOWNLOADS.items()):
+        if now - float(download.get("created_at", 0)) > DOWNLOAD_TTL_SECONDS:
+            DOWNLOADS.pop(file_id, None)
+
+
+def get_session(session_id: str) -> dict:
+    validate_uuid(session_id, "Session")
+    prune_expired_state()
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session tidak ditemukan atau sudah kedaluwarsa.")
+    return session
+
+
+def refresh_result_preview(session: dict, result):
+    preview = build_preview(
+        session["rekap"],
+        result.mapping,
+        session["mode"],
+        duplicates=result.duplicates,
+        validation_scores=result.validation_scores,
+        validation_codes=result.validation_codes,
+        missing_scores=result.missing_scores,
+        summary=result.summary,
+    )
+    return result.model_copy(update={"preview": preview})
+
+
+async def read_xlsx_upload(upload: UploadFile, label: str) -> bytes:
+    filename = Path(upload.filename or "").name
+    if Path(filename).suffix.lower() != ".xlsx":
+        raise HTTPException(status_code=400, detail=f"File {label} harus berformat .xlsx.")
+
+    content_type = (upload.content_type or "").lower()
+    if content_type not in XLSX_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Content-Type file {label} tidak valid untuk .xlsx.")
+
+    contents = bytearray()
+    while True:
+        chunk = await upload.read(UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        contents.extend(chunk)
+        if len(contents) > MAX_UPLOAD_BYTES:
+            max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+            raise HTTPException(status_code=413, detail=f"File {label} terlalu besar. Maksimal {max_mb} MB.")
+
+    data = bytes(contents)
+    if not data:
+        raise HTTPException(status_code=400, detail=f"File {label} kosong.")
+    if not zipfile.is_zipfile(BytesIO(data)):
+        raise HTTPException(status_code=400, detail=f"File {label} bukan workbook .xlsx yang valid atau corrupt.")
+    return data
 
 
 @app.get("/api/health")
@@ -75,8 +162,13 @@ def health():
 @app.post("/api/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest):
     expected_username = os.getenv("ADMIN_USERNAME", "admin")
-    expected_password = os.getenv("ADMIN_PASSWORD", "admin123")
-    if payload.username != expected_username or payload.password != expected_password:
+    expected_password = os.getenv("ADMIN_PASSWORD")
+    if not expected_password:
+        if is_production_runtime():
+            raise HTTPException(status_code=500, detail="ADMIN_PASSWORD belum dikonfigurasi di backend production.")
+        expected_password = "admin123"
+
+    if not secrets.compare_digest(payload.username, expected_username) or not secrets.compare_digest(payload.password, expected_password):
         raise HTTPException(status_code=401, detail="Username atau password salah.")
     return LoginResponse(token=RUNTIME_AUTH_TOKEN, username=payload.username)
 
@@ -97,14 +189,14 @@ async def analyze(
     if mode not in {"with_master", "without_master"}:
         raise HTTPException(status_code=400, detail="Mode harus with_master atau without_master.")
 
-    rekap_bytes = await rekap_file.read()
+    rekap_bytes = await read_xlsx_upload(rekap_file, "rekap")
     rekap = read_rekap_excel(rekap_bytes)
 
     master = None
     if mode == "with_master":
         if master_file is None:
             raise HTTPException(status_code=400, detail="Mode Pakai Data Master membutuhkan file Data Master.")
-        master_bytes = await master_file.read()
+        master_bytes = await read_xlsx_upload(master_file, "master")
         master = read_master_excel(master_bytes)
         result = analyze_with_master(rekap, master, use_groq=use_groq)
     else:
@@ -116,6 +208,7 @@ async def analyze(
         "rekap": rekap,
         "master": master,
         "result": result,
+        "created_at": time.time(),
     }
 
     payload = result.to_public_dict()
@@ -125,12 +218,10 @@ async def analyze(
 
 @app.post("/api/apply-approvals")
 def apply_approvals(payload: ApprovalPayload, _admin: bool = Depends(require_admin)):
-    session = SESSIONS.get(payload.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session tidak ditemukan atau sudah kedaluwarsa.")
+    session = get_session(payload.session_id)
 
     result = session["result"]
-    updated = apply_user_approvals(result, payload.approvals)
+    updated = refresh_result_preview(session, apply_user_approvals(result, payload.approvals))
     session["result"] = updated
 
     out = updated.to_public_dict()
@@ -140,14 +231,18 @@ def apply_approvals(payload: ApprovalPayload, _admin: bool = Depends(require_adm
 
 @app.post("/api/generate-excel")
 def generate_excel(payload: GenerateExcelPayload, _admin: bool = Depends(require_admin)):
-    session = SESSIONS.get(payload.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session tidak ditemukan atau sudah kedaluwarsa.")
+    session = get_session(payload.session_id)
 
     if payload.approvals:
-        session["result"] = apply_user_approvals(session["result"], payload.approvals)
+        session["result"] = refresh_result_preview(session, apply_user_approvals(session["result"], payload.approvals))
 
     result = session["result"]
+    unresolved = sum(1 for item in result.mapping if item.get("status_mapping") == "NEEDS_CONFIRMATION")
+    if unresolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Masih ada {unresolved} nama yang perlu dikonfirmasi sebelum generate Excel final.",
+        )
     if result.summary.get("total_mapped", 0) == 0 and session["mode"] == "with_master":
         raise HTTPException(status_code=400, detail="Tidak ada data berhasil dipetakan. Periksa file atau approval nama.")
 
@@ -165,7 +260,7 @@ def generate_excel(payload: GenerateExcelPayload, _admin: bool = Depends(require
 
     lookup_info = update_lookup_from_generated_excel(out_path)
 
-    DOWNLOADS[file_id] = str(out_path)
+    DOWNLOADS[file_id] = {"path": str(out_path), "created_at": time.time()}
     return {
         "file_id": file_id,
         "download_url": f"/api/download/{file_id}",
@@ -175,8 +270,11 @@ def generate_excel(payload: GenerateExcelPayload, _admin: bool = Depends(require
 
 
 @app.get("/api/download/{file_id}")
-def download(file_id: str):
-    path = DOWNLOADS.get(file_id)
+def download(file_id: str, _admin: bool = Depends(require_admin)):
+    validate_uuid(file_id, "File download")
+    prune_expired_state()
+    download_info = DOWNLOADS.get(file_id)
+    path = str(download_info.get("path")) if download_info else ""
     if not path or not Path(path).exists():
         raise HTTPException(status_code=404, detail="File download tidak ditemukan atau sudah kedaluwarsa.")
 

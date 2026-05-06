@@ -132,3 +132,23 @@ export async function generateExcel(sessionId: string, approvals: Approval[]) {
 export function downloadUrl(path: string) {
   return path.startsWith("http") ? path : `${API_BASE}${path}`;
 }
+
+function filenameFromDisposition(disposition: string | null): string {
+  const match = disposition?.match(/filename="?([^"]+)"?/i);
+  return match?.[1] || "Rekap_Nilai_Per_Kelas_Asli_Final.xlsx";
+}
+
+export async function downloadExcel(path: string) {
+  const res = await fetch(downloadUrl(path), { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+
+  const blob = await res.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filenameFromDisposition(res.headers.get("Content-Disposition"));
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}

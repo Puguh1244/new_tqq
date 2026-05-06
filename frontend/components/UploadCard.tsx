@@ -10,7 +10,7 @@ export function UploadCard({ label, file, onChange, required = false }: { label:
           <p className="text-xs text-slate-500">{file ? file.name : "Pilih file .xlsx"}</p>
         </div>
       </div>
-      <input className="mt-4 block w-full text-sm" type="file" accept=".xlsx,.xls" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
+      <input aria-label={label} className="mt-4 block w-full text-sm" type="file" accept=".xlsx" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
     </label>
   );
 }

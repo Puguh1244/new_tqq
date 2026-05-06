@@ -1,6 +1,48 @@
 import { Download, FileSpreadsheet, Loader2 } from "lucide-react";
-import { downloadUrl } from "@/lib/api";
 
-export function DownloadPage({ result, generating, downloadPath, onGenerate }: { result: any; generating: boolean; downloadPath: string | null; onGenerate: () => void }) {
-  return <main className="space-y-5"><header><h2 className="text-3xl font-black text-slate-900">Download</h2><p className="mt-1 text-sm text-slate-500">Generate dan unduh Excel final multi-sheet.</p></header><section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm"><div className="flex items-start justify-between gap-6"><div className="flex gap-4"><div className="rounded-3xl bg-emerald-50 p-4 text-emerald-600"><FileSpreadsheet className="h-8 w-8" /></div><div><h3 className="text-xl font-black text-slate-900">Excel Final</h3><p className="mt-1 text-sm text-slate-500">Status: {downloadPath ? "siap diunduh" : generating ? "sedang dibuat" : "belum dibuat"}</p><p className="mt-3 text-sm text-slate-600">Total mahasiswa: <b>{result?.summary?.total_mahasiswa_rekap || 0}</b> · Jumlah kelas: <b>{result?.summary?.jumlah_kelas || 0}</b></p></div></div><div className="flex gap-3"><button disabled={!result || generating} onClick={onGenerate} className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">{generating ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileSpreadsheet className="h-5 w-5" />}Generate Excel Final</button>{downloadPath ? <a href={downloadUrl(downloadPath)} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 font-bold text-white"><Download className="h-5 w-5" />Download Excel Final</a> : null}</div></div></section></main>;
+export function DownloadPage({
+  result,
+  generating,
+  downloading,
+  downloadPath,
+  onGenerate,
+  onDownload,
+}: {
+  result: any;
+  generating: boolean;
+  downloading: boolean;
+  downloadPath: string | null;
+  onGenerate: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <main className="space-y-5">
+      <header>
+        <h2 className="text-3xl font-black text-slate-900">Download</h2>
+        <p className="mt-1 text-sm text-slate-500">Generate dan unduh Excel final multi-sheet.</p>
+      </header>
+      <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="flex items-start justify-between gap-6">
+          <div className="flex gap-4">
+            <div className="rounded-3xl bg-emerald-50 p-4 text-emerald-600"><FileSpreadsheet className="h-8 w-8" /></div>
+            <div>
+              <h3 className="text-xl font-black text-slate-900">Excel Final</h3>
+              <p className="mt-1 text-sm text-slate-500">Status: {downloadPath ? "siap diunduh" : generating ? "sedang dibuat" : "belum dibuat"}</p>
+              <p className="mt-3 text-sm text-slate-600">Total mahasiswa: <b>{result?.summary?.total_mahasiswa_rekap || 0}</b> · Jumlah kelas: <b>{result?.summary?.jumlah_kelas || 0}</b></p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button disabled={!result || generating} onClick={onGenerate} className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">
+              {generating ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileSpreadsheet className="h-5 w-5" />}Generate Excel Final
+            </button>
+            {downloadPath ? (
+              <button disabled={downloading} onClick={onDownload} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 font-bold text-white disabled:opacity-50">
+                {downloading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}Download Excel Final
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    </main>
+  );
 }

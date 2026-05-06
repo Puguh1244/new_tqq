@@ -10,7 +10,7 @@ import { ValidasiNilaiPage } from "@/components/pages/ValidasiNilaiPage";
 import { PreviewOutputPage } from "@/components/pages/PreviewOutputPage";
 import { DownloadPage } from "@/components/pages/DownloadPage";
 import { PublicSearchPage } from "@/components/pages/PublicSearchPage";
-import { analyzeData, applyApprovals, clearAuthToken, generateExcel, getAuthToken } from "@/lib/api";
+import { analyzeData, applyApprovals, clearAuthToken, downloadExcel, generateExcel, getAuthToken } from "@/lib/api";
 import { AnalysisResult, Approval, Mode, PageKey } from "@/types";
 
 export default function Home() {
@@ -26,6 +26,7 @@ export default function Home() {
   const [downloadPath, setDownloadPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -71,6 +72,18 @@ export default function Home() {
     finally { setGenerating(false); }
   }
 
+  async function onDownload() {
+    if (!downloadPath) return;
+    setDownloading(true); setError(null);
+    try {
+      await downloadExcel(downloadPath);
+    } catch (e: any) {
+      setError(e.message || "Gagal download Excel.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   function logout() {
     clearAuthToken();
     setIsLoggedIn(false);
@@ -104,7 +117,7 @@ export default function Home() {
         {page === "validasi-nama" && <ValidasiNamaPage result={result} approvals={approvals} setApprovals={setApprovals} onApply={onApply} />}
         {page === "validasi-nilai" && <ValidasiNilaiPage result={result} />}
         {page === "preview" && <PreviewOutputPage result={result} />}
-        {page === "download" && <DownloadPage result={result} generating={generating} downloadPath={downloadPath} onGenerate={onGenerate} />}
+        {page === "download" && <DownloadPage result={result} generating={generating} downloading={downloading} downloadPath={downloadPath} onGenerate={onGenerate} onDownload={onDownload} />}
       </div>
     </div>
   );

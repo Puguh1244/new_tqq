@@ -18,6 +18,7 @@ AUDIT_SHEETS = {
     "VALIDASI_KODE",
     "RINGKASAN",
 }
+MIN_PUBLIC_NIM_LENGTH = int(os.getenv("PUBLIC_SEARCH_MIN_NIM_LENGTH", "6"))
 
 NIM_CANDIDATES = [
     "NIM",
@@ -160,6 +161,17 @@ def build_lookup_rows_from_generated_excel(final_excel_path: Path) -> list[dict[
                     continue
                 data[col_name] = jsonable(row.get(col))
 
+            if nim in by_nim:
+                existing_data = by_nim[nim]["data"]
+                duplicate_rows = existing_data.get("DUPLIKAT_NIM_ROWS")
+                if not isinstance(duplicate_rows, list):
+                    duplicate_rows = [dict(existing_data)]
+                    existing_data["DUPLIKAT_NIM_ROWS"] = duplicate_rows
+                duplicate_rows.append(data)
+                existing_data["DUPLIKAT_NIM_COUNT"] = str(len(duplicate_rows))
+                by_nim[nim]["updated_at"] = datetime.now(timezone.utc).isoformat()
+                continue
+
             by_nim[nim] = {
                 "nim": nim,
                 "nama": nama,
@@ -188,12 +200,20 @@ def update_lookup_from_generated_excel(final_excel_path: Path) -> dict[str, Any]
                 batch = rows[start : start + batch_size]
                 client.table(table).upsert(batch, on_conflict="nim").execute()
 
+        columns: list[str] = []
+        for row in rows:
+            for key in row["data"].keys():
+                if key not in columns:
+                    columns.append(key)
+        duplicate_nims = [row["nim"] for row in rows if row["data"].get("DUPLIKAT_NIM_COUNT")]
+
         return {
             "updated": True,
             "storage": "supabase",
             "table": table,
             "rows": len(rows),
-            "columns": list(rows[0]["data"].keys()) if rows else ["NIM", "NAMA", "KODE KELAS PAI"],
+            "columns": columns if columns else ["NIM", "NAMA", "KODE KELAS PAI"],
+            "duplicate_nims": duplicate_nims,
         }
     except Exception as exc:
         return {
@@ -222,17 +242,22 @@ def search_lookup_by_nim(nim: str) -> dict[str, Any]:
     q = normalize_nim(nim)
     if not q:
         return {"ready": True, "message": "Masukkan NIM.", "columns": ["NIM", "NAMA", "KODE KELAS PAI"], "rows": []}
+    if len(q) < MIN_PUBLIC_NIM_LENGTH:
+        return {
+            "ready": True,
+            "message": f"Masukkan minimal {MIN_PUBLIC_NIM_LENGTH} digit NIM.",
+            "columns": ["NIM", "NAMA", "KODE KELAS PAI"],
+            "rows": [],
+            "count": 0,
+            "storage": "supabase",
+        }
 
     try:
         client = get_supabase_client()
         table = supabase_table_name()
 
-        exact = client.table(table).select("nim,nama,kode_kelas_pai,data").eq("nim", q).limit(20).execute()
+        exact = client.table(table).select("nim,nama,kode_kelas_pai,data").eq("nim", q).limit(1).execute()
         records = exact.data or []
-
-        if not records:
-            contains = client.table(table).select("nim,nama,kode_kelas_pai,data").ilike("nim", f"%{q}%").limit(20).execute()
-            records = contains.data or []
 
         rows = [_public_row(record) for record in records]
         columns: list[str] = []
