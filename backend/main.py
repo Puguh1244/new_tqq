@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -42,10 +42,13 @@ app.add_middleware(
 
 SESSIONS: dict[str, dict] = {}
 DOWNLOADS: dict[str, dict[str, object]] = {}
+LOGIN_FAILURES: dict[str, dict[str, float | int]] = {}
 RUNTIME_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN") or secrets.token_urlsafe(32)
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", str(60 * 60)))
 DOWNLOAD_TTL_SECONDS = int(os.getenv("DOWNLOAD_TTL_SECONDS", str(60 * 60)))
+AUTH_LOCKOUT_MAX_FAILURES = int(os.getenv("AUTH_LOCKOUT_MAX_FAILURES", "5"))
+AUTH_LOCKOUT_WINDOW_SECONDS = int(os.getenv("AUTH_LOCKOUT_WINDOW_SECONDS", str(15 * 60)))
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 XLSX_CONTENT_TYPES = {
     "",
@@ -75,7 +78,57 @@ def require_admin(authorization: str | None = Header(default=None)) -> bool:
 
 
 def is_production_runtime() -> bool:
-    return os.getenv("VERCEL") == "1" or os.getenv("ENVIRONMENT", "").lower() == "production"
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    return (
+        os.getenv("VERCEL") == "1"
+        or environment == "production"
+        or bool(os.getenv("RENDER"))
+        or bool(os.getenv("RAILWAY_ENVIRONMENT"))
+        or bool(os.getenv("FLY_APP_NAME"))
+        or bool(os.getenv("K_SERVICE"))
+    )
+
+
+def insecure_dev_password_allowed() -> bool:
+    return os.getenv("ALLOW_INSECURE_DEV_PASSWORD", "").lower() == "true" and not is_production_runtime()
+
+
+def get_expected_admin_password() -> str:
+    expected_password = os.getenv("ADMIN_PASSWORD")
+    if expected_password and expected_password != "admin123":
+        return expected_password
+    if insecure_dev_password_allowed():
+        return expected_password or "admin123"
+    if expected_password == "admin123":
+        raise HTTPException(status_code=500, detail="ADMIN_PASSWORD masih memakai password default. Ganti password admin di backend.")
+    raise HTTPException(status_code=500, detail="ADMIN_PASSWORD belum dikonfigurasi di backend.")
+
+
+def login_failure_key(request: Request, username: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{client_host}:{username.strip().lower()}"
+
+
+def assert_login_not_locked(key: str) -> None:
+    failure = LOGIN_FAILURES.get(key)
+    if not failure:
+        return
+    now = time.time()
+    first_failed_at = float(failure.get("first_failed_at", 0))
+    if now - first_failed_at > AUTH_LOCKOUT_WINDOW_SECONDS:
+        LOGIN_FAILURES.pop(key, None)
+        return
+    if int(failure.get("count", 0)) >= AUTH_LOCKOUT_MAX_FAILURES:
+        raise HTTPException(status_code=429, detail="Terlalu banyak percobaan login gagal. Coba lagi beberapa menit lagi.")
+
+
+def record_login_failure(key: str) -> None:
+    now = time.time()
+    failure = LOGIN_FAILURES.get(key)
+    if not failure or now - float(failure.get("first_failed_at", 0)) > AUTH_LOCKOUT_WINDOW_SECONDS:
+        LOGIN_FAILURES[key] = {"count": 1, "first_failed_at": now}
+        return
+    failure["count"] = int(failure.get("count", 0)) + 1
 
 
 def validate_uuid(value: str, label: str) -> None:
@@ -160,16 +213,19 @@ def health():
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest):
+def login(payload: LoginRequest, request: Request):
     expected_username = os.getenv("ADMIN_USERNAME", "admin")
-    expected_password = os.getenv("ADMIN_PASSWORD")
-    if not expected_password:
-        if is_production_runtime():
-            raise HTTPException(status_code=500, detail="ADMIN_PASSWORD belum dikonfigurasi di backend production.")
-        expected_password = "admin123"
+    expected_password = get_expected_admin_password()
+    failure_key = login_failure_key(request, payload.username)
+    assert_login_not_locked(failure_key)
 
-    if not secrets.compare_digest(payload.username, expected_username) or not secrets.compare_digest(payload.password, expected_password):
+    username_ok = secrets.compare_digest(payload.username, expected_username)
+    password_ok = secrets.compare_digest(payload.password, expected_password)
+    if not username_ok or not password_ok:
+        record_login_failure(failure_key)
         raise HTTPException(status_code=401, detail="Username atau password salah.")
+
+    LOGIN_FAILURES.pop(failure_key, None)
     return LoginResponse(token=RUNTIME_AUTH_TOKEN, username=payload.username)
 
 
