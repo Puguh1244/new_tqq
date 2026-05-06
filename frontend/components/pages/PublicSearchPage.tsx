@@ -12,7 +12,7 @@ export function PublicSearchPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [searchLoading, setSearchLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
