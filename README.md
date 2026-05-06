@@ -62,6 +62,9 @@ http://localhost:8000
 ## Environment backend
 
 ```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=ganti-dengan-password-kuat
+APP_AUTH_TOKEN=ganti-dengan-token-random-panjang
 GROQ_API_KEY=
 GROQ_MODEL=openai/gpt-oss-120b
 FRONTEND_ORIGINS=http://localhost:3000
@@ -84,6 +87,8 @@ Backend ke Render/Railway:
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 - Set `GROQ_API_KEY` hanya di backend
+- Wajib set `ADMIN_PASSWORD` kuat dan jangan memakai password default `admin123` di backend deploy
+- Set `APP_AUTH_TOKEN` ke nilai random panjang agar token admin tetap stabil antar restart
 
 ## Catatan penting
 
